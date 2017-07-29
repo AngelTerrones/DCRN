@@ -1,13 +1,15 @@
 #!/usr/bin/env python
-import numpy as np
-import matplotlib.pyplot as plt
-
 """
 Agree & Pursue Algorithm
 Distributed Control of Robotic Networks.
 http://coordinationbook.info
 Page: 156
 """
+import numpy as np
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import matplotlib.patches as mp
+from matplotlib.animation import FuncAnimation
 
 
 class Robots:
@@ -26,15 +28,19 @@ class Robots:
         self.max_id = uid.copy()
         self._rcomm = rcomm
         self._kctrl = k
-        # evolution
-        self.pos_t  = [self.pos.copy()]
-        self.dirm_t = [self.dirm.copy()]
-        # comm
+        # communication buffer
         self.msg = [[] for _ in self.uid]  # null msgs for each robot
         # control
         self.u_ctrl = [0 for _ in self.uid]
+        # evolution
+        self.pos_b  = [self.pos.copy()]
+        self.dirm_b = [self.dirm.copy()]
+        self.u_b    = [self.u_ctrl.copy()]
 
     def broadcast(self):
+        """
+        Send message (theta, dir, max_id)
+        """
         nr      = len(self.uid)
         msg_tmp = [[] for _ in range(nr)]
         # send
@@ -50,6 +56,9 @@ class Robots:
         self.msg = msg_tmp.copy()
 
     def stf(self):
+        """
+        state-transition function.
+        """
         nr = len(self.uid)
         for i in range(nr):
             new_id  = None
@@ -61,12 +70,19 @@ class Robots:
                 if (id_rcvd > self.max_id[i]) and ((dist_cc(self.pos[i], pos_rcvd) <= self._rcomm and dir_rcvd == 'c') or (dist_c(self.pos[i], pos_rcvd) <= self._rcomm and dir_rcvd == 'cc')):
                     new_id  = id_rcvd
                     new_dir = dir_rcvd
+
             if new_id is not None:
                 self.max_id[i] = new_id
                 self.dirm[i]   = new_dir
-        self.dirm_t.append(self.dirm.copy())
+
+        # log data
+        self.dirm_b.append(self.dirm.copy())
 
     def ctl(self):
+        """
+        control function
+        Try to match the velocity of the nearest neighbor.
+        """
         nr = len(self.uid)
         for i in range(nr):
             d_tmp = self._rcomm
@@ -80,26 +96,37 @@ class Robots:
                 elif self.dirm[i] == 'c' and dist_c(pos, pos_rcvd) < d_tmp:
                     d_tmp = dist_c(pos, pos_rcvd)
                     u_tmp = -(self._kctrl * d_tmp)
+
             self.u_ctrl[i] = u_tmp
 
-    def move(self, dt):
-        # d_thetha = u_control
-        # so: d_pos = theta + dt * d_thetha
+        # log data
+        self.u_b.append(self.u_ctrl.copy())
+
+    def move(self):
+        """
+        Move the robot.
+        Because the ctl function is data-sampled, this does not need a dt. Assume the same time interval: 1 simulation step.
+        """
         nr = len(self.uid)
         for i in range(nr):
-            self.pos[i] = self.pos[i] + self.u_ctrl[i] * dt
-        # self.pos_t.append(self.pos.copy())
+            tmp = self.pos[i] + self.u_ctrl[i]
+            # wrap position: [-pi, pi]
+            self.pos[i] = (tmp + np.pi) % (2*np.pi) - np.pi
 
-    def Simulate(self, nstep=2000, subdiv_step=60):
-        for i in range(1, nstep):
-            self.broadcast()
-            self.stf()
-            self.ctl()
-            for _ in range(subdiv_step):
-                self.move(1.0 / subdiv_step)  # each step is a unit of "time".
+        # log data
+        self.pos_b.append(self.pos.copy())
+
+    def Simulate(self, step_phy):
+        self.broadcast()
+        self.stf()
+        self.ctl()
+        self.move()
 
 
 def dist_c(orig, dest):
+    """
+    Clockwise angular distance
+    """
     dpi = 2 * np.pi
     dist = (orig - dest) % dpi
     assert dist >= 0
@@ -107,6 +134,9 @@ def dist_c(orig, dest):
 
 
 def dist_cc(orig, dest):
+    """
+    CounterClockwise angular distance
+    """
     dpi = 2 * np.pi
     dist = (dest - orig) % dpi
     assert dist >= 0
@@ -122,49 +152,69 @@ def create_robots(nrobot, rcomm, k):
     return Robots(uid, dirm, pos, rcomm, k)
 
 
-def plot_robots(robots, radius=1):
-    # circle (working space)
-    _th = np.arange(0, 2 * np.pi, 0.01)
-    x = radius * np.cos(_th)
-    y = radius * np.sin(_th)
-
-    # Crear figures for the "robots"
+def plot_robots(robots, line):
+    """
+    Plot the robots using scatter
+    """
     sc_area = np.pi * (7.5)**2
-    rx = radius * np.cos(robots.pos)
-    ry = radius * np.sin(robots.pos)
-    colors = ['red' if x == 'cc' else 'blue' for x in robots.dirm]  # R = CounterClockwise, B = Clockwise
+    rx      = np.cos(robots.pos)
+    ry      = np.sin(robots.pos)
+    colors  = ['red' if x == 'cc' else 'blue' for x in robots.dirm]
+    line.axes.scatter(rx, ry, alpha=1, linewidths=2, s=sc_area, c='white', edgecolors=colors)
+    line.axes.set_xlim(-1.25, 1.25)
+    line.axes.set_ylim(-1.25, 1.25)
+    line.axes.set_aspect('equal')
+    line.axes.get_xaxis().set_visible(False)
+    line.axes.get_yaxis().set_visible(False)
+    line.axes.set_frame_on(False)
 
-    # do the plot
-    plt.figure()
-    plt.scatter(rx, ry, alpha=1, linewidths=2, s=sc_area, c='white', edgecolors=colors)
-    for i in range(len(rx)):
-        plt.text(rx[i], ry[i], str(i))
-    plt.plot(x, y, alpha=0.5)
-    plt.axis('equal')
-    plt.axis('off')
-
-
-def plot_direction(nr, robots):
-    data = np.array(robots.dirm_t)
-    x = np.arange(data.shape[0])
-    plt.figure()
-    for i in range(nr):
-        plt.plot(x, [1 if x == 'cc' else -1 for x in data[:, i]])
+    # Do the bloody legend.
+    # I #$% miss MATLAB
+    dir_legend = ['CounterClockwise', 'Clockwise']
+    circ       = [mp.Circle((0, 0), fc='r'), mp.Circle((0, 0), fc='b')]
+    line.axes.legend(circ, dir_legend)
 
 
-if __name__ == '__main__':
-    nr     = 20
+def update(frame, robots, line):
+    """
+    Updater for the plot animation.
+    """
+    robots.Simulate(10)
+    # plot
+    line.axes.clear()
+    plot_robots(robots, line)
+    return line,
+
+
+def main():
+    # ----------------------------------------------------------------------------------------------
+    # Simulation parameters
+    nr     = 45
     rcomm  = (2*np.pi)/(0.9*nr)
     kprop  = 3/16
     robots = create_robots(nr, rcomm, kprop)
-    rb = robots.__dict__  # stupid spyder
-    nstep  = 1000
+    nsteps = 500
 
-    plot_robots(robots)
-    robots.Simulate(nstep=nstep)
-    plot_robots(robots)
-    plot_direction(nr, robots)
+    # ----------------------------------------------------------------------------------------------
+    # create plot
+    mpl.rcParams['toolbar'] = 'None'
+    fig  = plt.figure(figsize=(7.5, 7.5))
+    line, = plt.plot([], [])
+    plot_robots(robots, line)
+    plt.tight_layout()
+    plt.axis('off')
+    plt.suptitle('Agree & Pursue algorithm')
+
+    # ----------------------------------------------------------------------------------------------
+    # Animation
+    animation = FuncAnimation(fig, update, fargs=(robots, line), frames=nsteps, interval=60, repeat=False)
+    if False:
+        animation.save("apl_{0}.gif".format(nr), dpi=80, writer='imagemagick')
     plt.show()
+
+
+if __name__ == '__main__':
+    main()
 
 # Local Variables:
 # flycheck-flake8-maximum-line-length: 120
