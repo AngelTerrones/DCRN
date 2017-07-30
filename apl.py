@@ -33,7 +33,6 @@ class Robots:
         # control
         self.u_ctrl = [0 for _ in self.uid]
         # evolution
-        self.pos_b  = [self.pos.copy()]
         self.dirm_b = [self.dirm.copy()]
         self.u_b    = [self.u_ctrl.copy()]
 
@@ -113,10 +112,7 @@ class Robots:
             # wrap position: [-pi, pi]
             self.pos[i] = (tmp + np.pi) % (2*np.pi) - np.pi
 
-        # log data
-        self.pos_b.append(self.pos.copy())
-
-    def Simulate(self, step_phy):
+    def Simulate(self):
         self.broadcast()
         self.stf()
         self.ctl()
@@ -179,7 +175,7 @@ def update(frame, robots, line):
     """
     Updater for the plot animation.
     """
-    robots.Simulate(10)
+    robots.Simulate()
     # plot
     line.axes.clear()
     plot_robots(robots, line)
@@ -189,27 +185,68 @@ def update(frame, robots, line):
 def main():
     # ----------------------------------------------------------------------------------------------
     # Simulation parameters
-    nr     = 45
+    nr     = 20
     rcomm  = (2*np.pi)/(0.9*nr)
     kprop  = 3/16
     robots = create_robots(nr, rcomm, kprop)
     nsteps = 500
 
-    # ----------------------------------------------------------------------------------------------
-    # create plot
-    mpl.rcParams['toolbar'] = 'None'
-    fig  = plt.figure(figsize=(7.5, 7.5))
-    line, = plt.plot([], [])
-    plot_robots(robots, line)
-    plt.tight_layout()
-    plt.axis('off')
-    plt.suptitle('Agree & Pursue algorithm')
+    # mpl.rcParams['toolbar'] = 'None'
+    if False:
+        # ----------------------------------------------------------------------------------------------
+        # Run the animation
+        # ----------------------------------------------------------------------------------------------
+        # create plot for the animation
+        fig  = plt.figure(figsize=(7.5, 7.5))
+        line, = plt.plot([], [])
+        plot_robots(robots, line)
+        plt.tight_layout()
+        plt.axis('off')
+        plt.suptitle('Agree & Pursue algorithm')
+
+        # ----------------------------------------------------------------------------------------------
+        # Animation
+        animation = FuncAnimation(fig, update, fargs=(robots, line), frames=nsteps, interval=60, repeat=False)
+        if False:
+            animation.save("apl_{0}.gif".format(nr), dpi=80, writer='imagemagick')
+    else:
+        # ----------------------------------------------------------------------------------------------
+        # Simulate the robots
+        for _ in range(nsteps):
+            robots.Simulate()
+        # ----------------------------------------------------------------------------------------------
+        # Create "ring" plot
+        plt.figure(figsize=(7.5, 7.5))
+        l, = plt.plot([], [])
+        plot_robots(robots, l)
+        plt.tight_layout()
+        plt.axis('off')
+        plt.suptitle('Agree & Pursue algorithm')
+
+        # ----------------------------------------------------------------------------------------------
+        # Subplot
+        # ----------------------------------------------------------------------------------------------
+        # direction
+        plt.figure(figsize=(15, 7.5))
+        plt.subplot(2, 1, 1)
+        dir_tmp = np.array([[1 if pos == 'cc' else -1 for pos in dir_h] for dir_h in robots.dirm_b])
+        for i in range(nr):
+            plt.plot(dir_tmp)
+        plt.yticks([-1, 1], ['C', 'CC'])
+        plt.title('Direction of movement')
+        plt.xlabel('Step [n]')
+        plt.ylabel('Direccion')
+        # ----------------------------------------------------------------------------------------------
+        # control
+        plt.subplot(2, 1, 2)
+        plt.plot(robots.u_b)
+        plt.title(r'Control signal $u[n]$')
+        plt.xlabel('Step [n]')
+        plt.ylabel(r'$u[n]$')
+
+        plt.tight_layout()
 
     # ----------------------------------------------------------------------------------------------
-    # Animation
-    animation = FuncAnimation(fig, update, fargs=(robots, line), frames=nsteps, interval=60, repeat=False)
-    if False:
-        animation.save("apl_{0}.gif".format(nr), dpi=80, writer='imagemagick')
     plt.show()
 
 
